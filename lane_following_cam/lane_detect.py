@@ -8,10 +8,18 @@ import numpy as np
 class LaneDetect(Node):
     def __init__(self):
         super().__init__('lane_detect')
-        # self.sub1 = self.create_subscription(Image, '/image_raw', self.raw_listener, 10)
-        # self.sub1  # prevent unused variable warning
-        self.sub2 = self.create_subscription(CompressedImage, '/image_raw/compressed', self.compr_listener, 10)
-        self.sub2  # prevent unused variable warning
+        # parameters
+        self.declare_parameter('raw_image', False)
+        self.declare_parameter('image_topic', '/image_raw')
+        img_topic = self.get_parameter('image_topic').value
+        if self.get_parameter('raw_image').value:
+            self.sub1 = self.create_subscription(Image, img_topic, self.raw_listener, 10)
+            self.sub1  # prevent unused variable warning
+            self.get_logger().info(f'lane_detect subscribed to raw image topic: {img_topic}')
+        else:
+            self.sub2 = self.create_subscription(CompressedImage, '/image_raw/compressed', self.compr_listener, 10)
+            self.sub2  # prevent unused variable warning
+            self.get_logger().info(f'lane_detect subscribed to compressed image topic: {img_topic}')
         self.pub1 = self.create_publisher(Image, '/lane_img', 10)
         self.bridge = CvBridge()
 
@@ -20,6 +28,12 @@ class LaneDetect(Node):
         cv_image = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
         # print info of the image, only once not every time
         self.get_logger().info(f'First raw img arrived, shape: {cv_image.shape}', once=True)
+        # Detect lanes
+        lane_image = self.detect_lanes(cv_image)
+        # Convert OpenCV image to ROS Image message
+        ros_image = self.bridge.cv2_to_imgmsg(lane_image, 'bgr8')
+        # Publish the image
+        self.pub1.publish(ros_image)
     
     def compr_listener(self, msg):
         # Convert ROS CompressedImage message to OpenCV image
@@ -58,7 +72,7 @@ class LaneDetect(Node):
         if lines is not None:
             for line in lines:
                 x1, y1, x2, y2 = line[0]
-                cv2.line(line_image, (x1, y1), (x2, y2), (0, 255, 0), 5)
+                cv2.line(line_image, (x1, y1), (x2, y2), (60, 200, 20), 5)
         # Combine the original image with the line image
         combined_image = cv2.addWeighted(image, 0.8, line_image, 1, 1)
         return combined_image
