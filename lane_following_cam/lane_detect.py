@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CompressedImage
+from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -11,6 +12,7 @@ class LaneDetect(Node):
         # parameters
         self.declare_parameter('raw_image', False)
         self.declare_parameter('image_topic', '/image_raw')
+        self.declare_parameter('debug', True)
         img_topic = self.get_parameter('image_topic').value
         if self.get_parameter('raw_image').value:
             self.sub1 = self.create_subscription(Image, img_topic, self.raw_listener, 10)
@@ -21,7 +23,9 @@ class LaneDetect(Node):
             self.sub2  # prevent unused variable warning
             self.get_logger().info(f'lane_detect subscribed to compressed image topic: {img_topic}')
         self.pub1 = self.create_publisher(Image, '/lane_img', 10)
+        self.pub2 = self.create_publisher(Twist, '/cmd_vel', 10)
         self.bridge = CvBridge()
+        self.debug = self.get_parameter('debug').value
 
     def raw_listener(self, msg):
         # Convert ROS Image message to OpenCV image
@@ -73,8 +77,53 @@ class LaneDetect(Node):
             for line in lines:
                 x1, y1, x2, y2 = line[0]
                 cv2.line(line_image, (x1, y1), (x2, y2), (60, 200, 20), 5)
+        center = width / 2
+        twist = Twist()
+        # Find the center of the lines and steer the robot
+        if lines is not None:
+            left_x = []
+            right_x = []
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                if x1 < width / 2 and x2 < width / 2:
+                    left_x.append(x1)
+                    left_x.append(x2)
+                elif x1 > width / 2 and x2 > width / 2:
+                    right_x.append(x1)
+                    right_x.append(x2)
+            sum_left = sum(left_x)
+            sum_right = sum(right_x)
+            # Ratio of the sum of the x-coordinates of the left lines to the right lines
+            if len(left_x) > 0 and len(right_x) > 0:
+                ratio = sum_left / sum_right
+                twist.linear.x = 0.2
+                twist.angular.z = 0.1 * (1 - ratio)
+                self.pub2.publish(twist)
+        else:
+            # If there are no lines detected, slow the robot
+            twist.angular.z = 0.0
+            twist.linear.x = 0.05
+            self.pub2.publish(twist)
+
+        # Display red point at the center of the image, and move based on twist.angular.z 
+        cv2.circle(line_image, (int(center + int(twist.angular.z * width * 5) ), int(height / 2.)), 5, (60, 40, 200), -1)
+
+        # Display the twist.angular.z value on the image and direction (left or right or straight)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        if twist.angular.z > 0.01:
+            text = 'Right'
+        elif twist.angular.z < -0.01:
+            text = 'Left'
+        else:
+            text = 'Straight'
+        cv2.putText(line_image, f'{text} {abs(twist.angular.z):.2f}', (10, 30), font, 1, (60, 40, 200), 2, cv2.LINE_AA)
+
+
         # Combine the original image with the line image
-        combined_image = cv2.addWeighted(image, 0.8, line_image, 1, 1)
+        if self.debug:
+            combined_image = line_image
+        else: 
+            combined_image = cv2.addWeighted(image, 0.8, line_image, 1, 1)
         return combined_image
 
 def main(args=None):
