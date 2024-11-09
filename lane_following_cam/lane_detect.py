@@ -53,62 +53,37 @@ class LaneDetect(Node):
         self.pub1.publish(ros_image)
 
     def detect_lanes(self, image):
-        # Convert to grayscale
+        # Step 1: Convert to grayscale and apply Canny edge detection and Gaussian blur
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # Apply Gaussian blur
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        # Detect edges using Canny
-        edges = cv2.Canny(blur, 50, 150)
-        # Define a region of interest
-        height, width = edges.shape
-        mask = np.zeros_like(edges)
-        polygon = np.array([[
-            (0, height),
-            (width, height),
-            (width, int(height * 0.6)),
-            (0, int(height * 0.6))
-        ]], np.int32)
-        cv2.fillPoly(mask, polygon, 255)
-        cropped_edges = cv2.bitwise_and(edges, mask)
-        # Detect lines using Hough transform
-        lines = cv2.HoughLinesP(cropped_edges, 1, np.pi / 180, 50, maxLineGap=50)
-        line_image = np.zeros_like(image)
-        if lines is not None:
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                cv2.line(line_image, (x1, y1), (x2, y2), (60, 200, 20), 5)
-        center = width / 2
+        # gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(gray, 100, 200)
+        
+        # Step 2: Crop a narrow stripe in front of the vehicle
+        ymin, ymax = 200, 240  # Define based on your camera view
+        stripe = edges[ymin:ymax, :]
+
+        # Step 3: Find left and right lane borders within the stripe
+        center_x = stripe.shape[1] // 2
+        cx_left = np.mean(np.nonzero(stripe[:, :center_x])[1]) if np.any(stripe[:, :center_x]) else center_x
+        cx_right = np.mean(np.nonzero(stripe[:, center_x:])[1]) + center_x if np.any(stripe[:, center_x:]) else center_x
+
+        # Step 4: Calculate the road center and adjust steering
+        cx_road = (cx_left + cx_right) / 2
+        center_deviation = cx_road - center_x
+
+        # Prepare Twist message for steering
         twist = Twist()
-        # Find the center of the lines and steer the robot
-        if lines is not None:
-            left_x = []
-            right_x = []
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-                if x1 < width / 2 and x2 < width / 2:
-                    left_x.append(x1)
-                    left_x.append(x2)
-                elif x1 > width / 2 and x2 > width / 2:
-                    right_x.append(x1)
-                    right_x.append(x2)
-            sum_left = sum(left_x)
-            sum_right = sum(right_x)
-            # Ratio of the sum of the x-coordinates of the left lines to the right lines
-            if len(left_x) > 0 and len(right_x) > 0:
-                ratio = sum_left / sum_right
-                twist.linear.x = 0.2
-                twist.angular.z = 0.1 * (1 - ratio)
-                self.pub2.publish(twist)
-        else:
-            # If there are no lines detected, slow the robot
-            twist.angular.z = 0.0
-            twist.linear.x = 0.05
-            self.pub2.publish(twist)
+        twist.linear.x = 0.2  # Constant forward speed
+        twist.angular.z = -0.01 * center_deviation  # Adjust angular speed based on deviation
+        self.pub2.publish(twist)
 
-        # Display red point at the center of the image, and move based on twist.angular.z 
-        cv2.circle(line_image, (int(center + int(twist.angular.z * width * 5) ), int(height / 2.)), 5, (60, 40, 200), -1)
+        # Debug: Visualize the lane and center points
+        line_image = np.zeros_like(image)
+        cv2.line(line_image, (int(cx_left), ymin), (int(cx_left), ymax), (255, 0, 0), 2)  # Left lane border
+        cv2.line(line_image, (int(cx_right), ymin), (int(cx_right), ymax), (0, 255, 0), 2)  # Right lane border
+        cv2.circle(line_image, (int(cx_road), (ymin + ymax) // 2), 5, (0, 0, 255), -1)  # Center point
 
-        # Display the twist.angular.z value on the image and direction (left or right or straight)
+        # Display the twist.angular.z value on the image and direction (left, right, or straight)
         font = cv2.FONT_HERSHEY_SIMPLEX
         if twist.angular.z > 0.01:
             text = 'Right'
@@ -118,11 +93,11 @@ class LaneDetect(Node):
             text = 'Straight'
         cv2.putText(line_image, f'{text} {abs(twist.angular.z):.2f}', (10, 30), font, 1, (60, 40, 200), 2, cv2.LINE_AA)
 
-
-        # Combine the original image with the line image
+        
+        # Combine the original image with the line image for visualization
         if self.debug:
             combined_image = line_image
-        else: 
+        else:
             combined_image = cv2.addWeighted(image, 0.8, line_image, 1, 1)
         return combined_image
 
