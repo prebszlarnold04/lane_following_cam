@@ -6,6 +6,8 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 
+
+
 class LaneDetect(Node):
     def __init__(self):
         super().__init__('lane_detect')
@@ -53,9 +55,11 @@ class LaneDetect(Node):
         self.pub1.publish(ros_image)
 
     def detect_lanes(self, image):
-        # Step 1: Convert to grayscale and apply Canny edge detection and Gaussian blur
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Step 1: Increase brightness to handle low-light conditions
+        imageBrighnessHigh = cv2.convertScaleAbs(image, alpha=1, beta=10)
+        
+        # Convert the brightness-adjusted image to grayscale and apply edge detection
+        gray = cv2.cvtColor(imageBrighnessHigh, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 100, 200)
         
         # Step 2: Crop a narrow stripe in front of the vehicle
@@ -78,7 +82,7 @@ class LaneDetect(Node):
         self.pub2.publish(twist)
 
         # Debug: Visualize the lane and center points
-        line_image = np.zeros_like(image)
+        line_image = np.zeros_like(imageBrighnessHigh)  # Use brightness-adjusted image dimensions for visualization
         cv2.line(line_image, (int(cx_left), ymin), (int(cx_left), ymax), (255, 0, 0), 2)  # Left lane border
         cv2.line(line_image, (int(cx_right), ymin), (int(cx_right), ymax), (0, 255, 0), 2)  # Right lane border
         cv2.circle(line_image, (int(cx_road), (ymin + ymax) // 2), 5, (0, 0, 255), -1)  # Center point
@@ -93,13 +97,13 @@ class LaneDetect(Node):
             text = 'Straight'
         cv2.putText(line_image, f'{text} {abs(twist.angular.z):.2f}', (10, 30), font, 1, (60, 40, 200), 2, cv2.LINE_AA)
 
-        
-        # Combine the original image with the line image for visualization
+        # Combine the brightness-adjusted image with the line image for visualization
         if self.debug:
             combined_image = line_image
         else:
-            combined_image = cv2.addWeighted(image, 0.8, line_image, 1, 1)
+            combined_image = cv2.addWeighted(imageBrighnessHigh, 0.8, line_image, 1, 1)
         return combined_image
+
 
 def main(args=None):
     rclpy.init(args=args)
