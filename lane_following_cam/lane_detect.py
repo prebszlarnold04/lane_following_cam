@@ -63,13 +63,18 @@ class LaneDetect(Node):
         edges = cv2.Canny(gray, 100, 200)
         
         # Step 2: Crop a narrow stripe in front of the vehicle
-        ymin, ymax = 200, 240  # Define based on your camera view
+        height, _ = edges.shape
+        ymin, ymax = int(height/3)-10, int(height/3)+30  # Define based on your camera view
         stripe = edges[ymin:ymax, :]
 
         # Step 3: Find left and right lane borders within the stripe
+        # Method 1 using mean
         center_x = stripe.shape[1] // 2
         cx_left = np.mean(np.nonzero(stripe[:, :center_x])[1]) if np.any(stripe[:, :center_x]) else center_x
         cx_right = np.mean(np.nonzero(stripe[:, center_x:])[1]) + center_x if np.any(stripe[:, center_x:]) else center_x
+        # Method 2 using max on the left and min on the right
+        # cx_left_max = np.max(np.atleast_1d(stripe[:, center_x])[1]) if np.any(stripe[:, :center_x]) else center_x
+        # cx_left_min = np.min(np.atleast_1d(stripe[:, center_x])[1]) if np.any(stripe[:, :center_x]) else center_x
 
         # Step 4: Calculate the road center and adjust steering
         cx_road = (cx_left + cx_right) / 2
